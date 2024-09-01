@@ -10,6 +10,8 @@ import torch.optim as optim
 
 from src.blocks import UNet
 from src.score_matching import ScoreMatchingModel, ScoreMatchingModelConfig
+import torch.nn.functional as F
+
 
 
 if __name__ == "__main__":
@@ -121,8 +123,9 @@ if __name__ == "__main__":
     input_mean = 127
     x_vis = x[:32] * input_sd + input_mean
 
-    nrows, ncols = 10, 3
+    nrows, ncols = 1, 1
 
+    ####################################################################################################################
     ####################################################################################################################
     # define here your degraded images as deg_x, e.g.,
 
@@ -133,22 +136,28 @@ if __name__ == "__main__":
     print("Shape of x_vis: " + str(x_vis.shape))
 
 
+    noise = 0.5
 
-    raster_vis = np.zeros((nrows * 32, ncols * 32 * 1), dtype=np.float32)
+    single_degraded_box = np.zeros((1, 1, 32, 32), dtype=np.float32) - 1
+    single_degraded_box[0][0][0: 16, 0: 32] = x_true[0][0][0: 16, 0: 32]
+    single_degraded_box[0][0][16: 32, 0: 16] = x_true[0][0][16: 32, 0: 16]
 
-    for i in range(nrows * ncols):
-        offset =  0
-        row, col = i // ncols, i % ncols
-        raster_vis[32 * row : 32 * (row + 1), offset + 32 * col : offset + 32 * (col + 1)] = x_vis[i].reshape(32, 32)
 
-    plt.imsave("./examples/x_true.png", raster_vis, vmin=0, vmax=255, cmap='gray')
+    plt.imsave("./examples/single_degraded_box.png", single_degraded_box[0][0] * input_sd + input_mean, vmin=0, vmax=255, cmap='gray')
 
-    noise = 1
+
+    downscaled_tensor = F.interpolate(torch.from_numpy(x_true[:1, :1]), size=(8, 8), mode='bilinear', align_corners=False)
+    single_degraded_downscale = F.interpolate(downscaled_tensor, size=(32, 32), mode='bilinear', align_corners=False).numpy()
+
+    plt.imsave("./examples/single_degraded_downscale.png", single_degraded_downscale[0][0] * input_sd + input_mean, vmin=0,
+               vmax=255, cmap='gray')
 
     # end of your code
     ####################################################################################################################
+    ####################################################################################################################
+    # Sample for image with removed box
 
-    samples = model.sample(bsz=32, noise = noise, x0 = deg_x, device=args.device).cpu().numpy()
+    samples = model.sample(bsz=1, noise = noise, x0 = single_degraded_box, device=args.device).cpu().numpy()
     samples = rearrange(samples, "t b () h w -> t b (h w)")
     samples = samples * input_sd + input_mean
 
@@ -159,8 +168,6 @@ if __name__ == "__main__":
     raster = np.zeros((nrows * 32, ncols * 32 * (percents + 2)), dtype=np.float32)
 
     deg_x = deg_x * input_sd + input_mean
-
-
 
     # blocks of resulting images. Last row is the degraded image, before last row: the noise-free images. 
     # First rows show the denoising progression
@@ -181,12 +188,101 @@ if __name__ == "__main__":
     for i in range(nrows * ncols):
         offset =  32 * ncols * (percents+1)
         row, col = i // ncols, i % ncols
-        raster[32 * row : 32 * (row + 1), offset + 32 * col : offset + 32 * (col + 1)] = deg_x[i].reshape(32, 32)
+        raster[32 * row : 32 * (row + 1), offset + 32 * col : offset + 32 * (col + 1)] = single_degraded_box[0][0] * input_sd + input_mean
 
     raster[:,::32*3] = 64
 
-    print("GOT HERE!")
 
 
-    plt.imsave("./examples/ex_mnist.png", raster, vmin=0, vmax=255, cmap='gray')
+    plt.imsave("./examples/ex_mnist_box.png", raster, vmin=0, vmax=255, cmap='gray')
+
+    ####################################################################################################################
+    ####################################################################################################################
+    # Sample for downscaled image
+
+    samples = model.sample(bsz=1, noise=noise, x0=single_degraded_downscale, device=args.device).cpu().numpy()
+    samples = rearrange(samples, "t b () h w -> t b (h w)")
+    samples = samples * input_sd + input_mean
+
+    percents = len(samples)
+    print("Number of samples:" + str(percents))
+
+    raster = np.zeros((nrows * 32, ncols * 32 * (percents + 2)), dtype=np.float32)
+
+    deg_x = deg_x * input_sd + input_mean
+
+    # blocks of resulting images. Last row is the degraded image, before last row: the noise-free images.
+    # First rows show the denoising progression
+    for percent_idx in range(percents):
+        itr_num = int(round(percent_idx / (percents - 1) * (len(samples) - 1)))
+        print(itr_num)
+        for i in range(nrows * ncols):
+            row, col = i // ncols, i % ncols
+            offset = 32 * ncols * (percent_idx)
+            raster[32 * row: 32 * (row + 1), offset + 32 * col: offset + 32 * (col + 1)] = samples[itr_num][i].reshape(
+                32, 32)
+
+        # last block of nrow,ncol of input images
+    for i in range(nrows * ncols):
+        offset = 32 * ncols * percents
+        row, col = i // ncols, i % ncols
+        raster[32 * row: 32 * (row + 1), offset + 32 * col: offset + 32 * (col + 1)] = x_vis[i].reshape(32, 32)
+
+    for i in range(nrows * ncols):
+        offset = 32 * ncols * (percents + 1)
+        row, col = i // ncols, i % ncols
+        raster[32 * row: 32 * (row + 1), offset + 32 * col: offset + 32 * (col + 1)] = single_degraded_downscale[0][
+                                                                                           0] * input_sd + input_mean
+
+    raster[:, ::32 * 3] = 64
+
+    plt.imsave("./examples/ex_mnist_downscale.png", raster, vmin=0, vmax=255, cmap='gray')
+
+    ####################################################################################################################
+    ####################################################################################################################
+    #Finding distribution of L2 loss
+
+
+    l2_arr = []
+    x_true = x[:32].reshape(32, 1, 32, 32).copy()
+
+    for index in range(30):
+
+        single_degraded_box = np.zeros((1, 1, 32, 32), dtype=np.float32) - 1
+        single_degraded_box[0][0][0: 16, 0: 32] = x_true[index][0][0: 16, 0: 32]
+        #single_degraded_box[0][0][16: 32, 0: 16] = x_true[index][0][16: 32, 0: 16]
+
+
+        downscaled_tensor = F.interpolate(torch.from_numpy(x_true[index:index + 1, :1]), size=(16, 16), mode='bilinear',
+                                          align_corners=False)
+        single_degraded_downscale = F.interpolate(downscaled_tensor, size=(32, 32), mode='bilinear',
+                                                  align_corners=False).numpy()
+
+        #DONT NEED TO ADD MEAN, BOTH DISTRIBUTIONS HAVE THE SAME MEAN
+
+        #print(x_true[0][0][16])
+
+        l2_arr.append((np.linalg.norm(single_degraded_downscale[0][0] - x_true[index][0]) - 5.25) / 0.6)
+
+
+    print(l2_arr)
+    print(np.mean(l2_arr))
+    print(np.std(l2_arr))
+
+def estimate_noise_quarter_removed(original, degraded) -> int:
+    return 0
+
+def estimate_noise_quarter_removed(original, degraded) -> int:
+    return 0
+
+
+
+
+
+
+
+
+
+
+
 
