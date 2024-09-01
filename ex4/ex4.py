@@ -22,8 +22,12 @@ def estimate_noise_quarter_removed(original, degraded) -> float:
     mean_initial_dist, sd_intial_dist = 10.5, 2.4
     min_noise, max_noise = 0.65, 0.785;
 
+
+    bias_grey = np.zeros((32, 32), dtype=np.float32)
+    # bias_grey[0: 16, 16: 32] = -1
+
     # calculate the L2 distance between the original and degraded image
-    l2_loss = np.linalg.norm(original - degraded)
+    l2_loss = np.linalg.norm(original - (degraded + bias_grey))
     print("L2 Loss: " + str(l2_loss))
 
     # Normalize to distribution with mean 0 and SD 1 using the mean and SD we found
@@ -128,13 +132,7 @@ if __name__ == "__main__":
     # Select training_set and testing_set
     transform =  transforms.Compose([transforms.Resize(32), transforms.ToTensor(),transforms.Normalize([0.5],[0.5])])
 
-    # train_loader = datasets.MNIST("data", 
-    #                               train= True,
-    #                              download=True,
-    #                              transform=transform)
 
-    # train_loader = torch.utils.data.DataLoader(train_loader, batch_size=60000,
-    #                                             shuffle=True, num_workers=0)
 
     test_loader = datasets.MNIST("data", 
                                   train= False,
@@ -151,27 +149,6 @@ if __name__ == "__main__":
     x = x.view(-1,32*32).numpy()
     # x = torch.squeeze(x,1).numpy()
 
-    # print(x.shape)
-    # print(torch.min(x))
-
-    # for data, target in test_loader:
-    #     print(data.shape)
-
-    # exit()
-
-
-
-    # x, _ = fetch_openml("mnist_784") # , version=1, return_X_y=True, as_frame=False, cache=True)
-
-    # # Reshape to 32x32
-    # x = rearrange(x, "b (h w) -> b h w", h=28, w=28)
-    # x = np.pad(x, pad_width=((0, 0), (2, 2), (2, 2)))
-    # x = rearrange(x, "b h w -> b (h w)")
-
-    # # Standardize to [-1, 1]
-    # input_mean = np.full((1, 32 ** 2), fill_value=127.5, dtype=np.float32)
-    # input_sd = np.full((1, 32 ** 2), fill_value=127.5, dtype=np.float32)
-    # x = ((x - input_mean) / input_sd).astype(np.float32)
 
     nn_module = UNet(1, 128, (1, 2, 4, 8))
     model = ScoreMatchingModel(
@@ -228,10 +205,10 @@ if __name__ == "__main__":
 
     single_degraded_box = np.zeros((1, 1, 32, 32), dtype=np.float32)
     single_degraded_box[0][0][0: 32, 0: 16] = x_true[0][0][0: 32, 0: 16]
-    #single_degraded_box[0][0][16: 32, 16: 32] = x_true[0][0][16: 32, 16: 32]
+    single_degraded_box[0][0][16: 32, 16: 32] = x_true[0][0][16: 32, 16: 32]
 
 
-    noise = estimate_noise_half_removed(x_true[0][0], single_degraded_box[0][0])
+    noise = estimate_noise_quarter_removed(x_true[0][0], single_degraded_box[0][0])
 
     plt.imsave("./examples/single_degraded_box.png", single_degraded_box[0][0] * input_sd + input_mean, vmin=0, vmax=255, cmap='gray')
 
